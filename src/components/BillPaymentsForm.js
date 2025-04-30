@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useFormik } from 'formik';
 import * as Yup from 'yup';
 import {
@@ -12,10 +12,13 @@ import {
   Card,
   CardContent,
   InputAdornment,
+  Snackbar,
+  Alert,
 } from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { Save, Receipt } from '@mui/icons-material';
 import { formatLKR, parseLKR } from '../utils/formatters';
+import { billPaymentService } from '../utils/api';
 
 const validationSchema = Yup.object({
   dateOfPayment: Yup.date().required('Date of Payment is required'),
@@ -48,6 +51,8 @@ const validationSchema = Yup.object({
 });
 
 function BillPaymentsForm() {
+  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
+
   const formik = useFormik({
     initialValues: {
       dateOfPayment: null,
@@ -59,16 +64,37 @@ function BillPaymentsForm() {
       recoveryRetention: '0',
     },
     validationSchema: validationSchema,
-    onSubmit: (values) => {
-      const formattedValues = {
-        ...values,
-        billAmount: parseLKR(values.billAmount),
-        recoveryAdvance: parseLKR(values.recoveryAdvance),
-        recoveryLiquidityDamages: parseLKR(values.recoveryLiquidityDamages),
-        recoveryOthers: parseLKR(values.recoveryOthers),
-        recoveryRetention: parseLKR(values.recoveryRetention),
-      };
-      console.log('Form values:', formattedValues);
+    onSubmit: async (values) => {
+      try {
+        const formattedValues = {
+          date_of_payment: values.dateOfPayment ? values.dateOfPayment.format('YYYY-MM-DD') : null,
+          bill_no: values.billNo,
+          bill_amount: parseLKR(values.billAmount),
+          recovery_advance: parseLKR(values.recoveryAdvance),
+          recovery_liquidity_damages: parseLKR(values.recoveryLiquidityDamages),
+          recovery_others: parseLKR(values.recoveryOthers),
+          recovery_retention: parseLKR(values.recoveryRetention),
+          net_payment: Number(parseLKR(values.billAmount)) -
+            (Number(parseLKR(values.recoveryAdvance)) +
+             Number(parseLKR(values.recoveryLiquidityDamages)) +
+             Number(parseLKR(values.recoveryOthers)) +
+             Number(parseLKR(values.recoveryRetention)))
+        };
+        
+        await billPaymentService.create(formattedValues);
+        setSnackbar({
+          open: true,
+          message: 'Bill payment details saved successfully!',
+          severity: 'success',
+        });
+        formik.resetForm();
+      } catch (error) {
+        setSnackbar({
+          open: true,
+          message: error.message || 'Failed to save bill payment details',
+          severity: 'error',
+        });
+      }
     },
   });
 
@@ -83,6 +109,10 @@ function BillPaymentsForm() {
     ) || 0;
     return billAmount - recoveries;
   }, [formik.values]);
+
+  const handleSnackbarClose = () => {
+    setSnackbar({ ...snackbar, open: false });
+  };
 
   return (
     <Box sx={{ maxWidth: 1000, margin: '0 auto', pt: 1 }}>
@@ -348,6 +378,17 @@ function BillPaymentsForm() {
           </Grid>
         </form>
       </Paper>
+
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={6000}
+        onClose={handleSnackbarClose}
+        anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
+      >
+        <Alert onClose={handleSnackbarClose} severity={snackbar.severity}>
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 }

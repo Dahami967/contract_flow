@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useFormik } from 'formik';
 import * as Yup from 'yup';
 import {
@@ -10,10 +10,14 @@ import {
   Grid,
   Divider,
   InputAdornment,
+  Snackbar,
+  Alert,
+  MenuItem
 } from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { Save, Payment } from '@mui/icons-material';
 import { formatLKR, parseLKR } from '../utils/formatters';
+import { advancePaymentService, projectService } from '../utils/api';
 
 const validationSchema = Yup.object({
   dateOfPayment: Yup.date().required('Date of Payment is required'),
@@ -32,24 +36,81 @@ const validationSchema = Yup.object({
 });
 
 function AdvancePaymentForm() {
+  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [projects, setProjects] = useState([]);
+  const [isLoadingProjects, setIsLoadingProjects] = useState(true);
+
+  useEffect(() => {
+    const fetchProjects = async () => {
+      try {
+        const data = await projectService.getAll();
+        setProjects(data);
+      } catch (error) {
+        setSnackbar({
+          open: true,
+          message: 'Failed to fetch projects',
+          severity: 'error',
+        });
+      } finally {
+        setIsLoadingProjects(false);
+      }
+    };
+    fetchProjects();
+  }, []);
+
   const formik = useFormik({
     initialValues: {
+      projectId: '',
       dateOfPayment: null,
       amountPaid: '',
       advanceBondBank: '',
       advanceBondAmount: '',
       advanceBondExpiry: null,
     },
-    validationSchema: validationSchema,
-    onSubmit: (values) => {
-      const formattedValues = {
-        ...values,
-        amountPaid: parseLKR(values.amountPaid),
-        advanceBondAmount: parseLKR(values.advanceBondAmount)
-      };
-      console.log('Form values:', formattedValues);
+    validationSchema: validationSchema.shape({
+      projectId: Yup.string().required('Project is required'),
+    }),
+    onSubmit: async (values) => {
+      setIsSubmitting(true);
+      try {
+        const formattedValues = {
+          project_id: values.projectId,
+          date_of_payment: values.dateOfPayment ? values.dateOfPayment.format('YYYY-MM-DD') : null,
+          amount_paid: parseLKR(values.amountPaid),
+          advance_bond_bank: values.advanceBondBank,
+          advance_bond_amount: parseLKR(values.advanceBondAmount),
+          advance_bond_expiry: values.advanceBondExpiry ? values.advanceBondExpiry.format('YYYY-MM-DD') : null,
+        };
+        
+        await advancePaymentService.create(formattedValues);
+        setSnackbar({
+          open: true,
+          message: 'Advance payment details saved successfully!',
+          severity: 'success',
+        });
+        formik.resetForm();
+      } catch (error) {
+        let errorMessage = 'Failed to save advance payment details';
+        if (error.message.includes('foreign key constraint')) {
+          errorMessage = 'Invalid project selected';
+        } else if (error.message.includes('Duplicate entry')) {
+          errorMessage = 'An advance payment already exists for this project';
+        }
+        setSnackbar({
+          open: true,
+          message: errorMessage,
+          severity: 'error',
+        });
+      } finally {
+        setIsSubmitting(false);
+      }
     },
   });
+
+  const handleSnackbarClose = () => {
+    setSnackbar({ ...snackbar, open: false });
+  };
 
   return (
     <Box sx={{ maxWidth: 1000, margin: '0 auto', pt: 1 }}>
@@ -217,6 +278,32 @@ function AdvancePaymentForm() {
               />
             </Grid>
 
+            <Grid item xs={12} sm={6}>
+              <TextField
+                select
+                fullWidth
+                id="projectId"
+                name="projectId"
+                label="Project"
+                value={formik.values.projectId}
+                onChange={formik.handleChange}
+                error={formik.touched.projectId && Boolean(formik.errors.projectId)}
+                helperText={formik.touched.projectId && formik.errors.projectId}
+                disabled={isLoadingProjects}
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    backgroundColor: '#ffffff'
+                  }
+                }}
+              >
+                {projects.map((project) => (
+                  <MenuItem key={project.id} value={project.id}>
+                    {project.project_no} - {project.project_description}
+                  </MenuItem>
+                ))}
+              </TextField>
+            </Grid>
+
             <Grid item xs={12}>
               <Button
                 type="submit"
@@ -224,6 +311,7 @@ function AdvancePaymentForm() {
                 color="primary"
                 size="large"
                 startIcon={<Save />}
+                disabled={isSubmitting || isLoadingProjects}
                 sx={{ 
                   mt: 4,
                   px: 4,
@@ -235,12 +323,23 @@ function AdvancePaymentForm() {
                   }
                 }}
               >
-                Save Advance Payment Details
+                {isSubmitting ? 'Saving...' : 'Save Advance Payment Details'}
               </Button>
             </Grid>
           </Grid>
         </form>
       </Paper>
+
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={6000}
+        onClose={handleSnackbarClose}
+        anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
+      >
+        <Alert onClose={handleSnackbarClose} severity={snackbar.severity}>
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 }

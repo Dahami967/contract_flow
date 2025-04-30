@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useFormik } from 'formik';
 import * as Yup from 'yup';
 import {
@@ -10,9 +10,12 @@ import {
   Grid,
   Divider,
   InputAdornment,
+  Snackbar,
+  Alert,
 } from '@mui/material';
 import { Save } from '@mui/icons-material';
 import { formatLKR, parseLKR } from '../utils/formatters';
+import { projectService } from '../utils/api';
 
 const validationSchema = Yup.object({
   projectNo: Yup.string().required('Project No is required'),
@@ -44,6 +47,8 @@ const validationSchema = Yup.object({
 });
 
 function ProjectDetailsForm() {
+  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
+
   const formik = useFormik({
     initialValues: {
       projectNo: '',
@@ -60,14 +65,43 @@ function ProjectDetailsForm() {
       relevantPc: '',
     },
     validationSchema: validationSchema,
-    onSubmit: (values) => {
-      const formattedValues = {
-        ...values,
-        totalCostEstimate: parseLKR(values.totalCostEstimate)
-      };
-      console.log('Form values:', formattedValues);
+    onSubmit: async (values) => {
+      try {
+        const formattedValues = {
+          project_no: values.projectNo,
+          project_description: values.projectDescription,
+          district: values.district,
+          ds_division: values.dsDivision,
+          fund_source: values.fundSource,
+          vote_details: values.voteDetails,
+          total_cost_estimate: parseLKR(values.totalCostEstimate),
+          beneficiaries: Number(values.beneficiaries),
+          output: values.output,
+          outcome: values.outcome,
+          feasibility_studies: values.feasibilityStudies,
+          relevant_pc: values.relevantPc,
+        };
+        
+        await projectService.create(formattedValues);
+        setSnackbar({
+          open: true,
+          message: 'Project details saved successfully!',
+          severity: 'success',
+        });
+        formik.resetForm();
+      } catch (error) {
+        setSnackbar({
+          open: true,
+          message: error.message || 'Failed to save project details',
+          severity: 'error',
+        });
+      }
     },
   });
+
+  const handleSnackbarClose = () => {
+    setSnackbar({ ...snackbar, open: false });
+  };
 
   return (
     <Box sx={{ maxWidth: 1000, margin: '0 auto', pt: 1 }}>
@@ -407,6 +441,17 @@ function ProjectDetailsForm() {
           </Grid>
         </form>
       </Paper>
+
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={6000}
+        onClose={handleSnackbarClose}
+        anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
+      >
+        <Alert onClose={handleSnackbarClose} severity={snackbar.severity}>
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 }

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useFormik } from 'formik';
 import * as Yup from 'yup';
 import {
@@ -10,10 +10,14 @@ import {
   Grid,
   Divider,
   InputAdornment,
+  Snackbar,
+  Alert,
+  MenuItem,
 } from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { Save } from '@mui/icons-material';
 import { formatLKR, parseLKR } from '../utils/formatters';
+import { contractorService, projectService } from '../utils/api';
 
 const validationSchema = Yup.object({
   dateAwarded: Yup.date().required('Date Awarded is required'),
@@ -36,8 +40,43 @@ const validationSchema = Yup.object({
 });
 
 function ContractorSelectionForm() {
+  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [projects, setProjects] = useState([]);
+  const [isLoadingProjects, setIsLoadingProjects] = useState(true);
+
+  useEffect(() => {
+    const fetchProjects = async () => {
+      setIsLoadingProjects(true);
+      try {
+        const data = await projectService.getAll();
+        console.log('Fetched projects:', data); // Debug log
+        if (!Array.isArray(data)) {
+          throw new Error('Invalid data format received from server');
+        }
+        if (data.length === 0) {
+          console.log('No projects found in database'); // Debug log
+        }
+        setProjects(data);
+      } catch (error) {
+        console.error('Failed to fetch projects:', error);
+        setSnackbar({
+          open: true,
+          message: `Failed to fetch projects: ${error.message}`,
+          severity: 'error',
+        });
+        setProjects([]);
+      } finally {
+        setIsLoadingProjects(false);
+      }
+    };
+
+    fetchProjects();
+  }, []);
+
   const formik = useFormik({
     initialValues: {
+      projectId: '',
       dateAwarded: null,
       contractorName: '',
       contractNo: '',
@@ -48,39 +87,57 @@ function ContractorSelectionForm() {
       performanceBondAmount: '',
       performanceBondExpiry: null,
     },
-    validationSchema: validationSchema,
-    onSubmit: (values) => {
-      const formattedValues = {
-        ...values,
-        contractAmount: parseLKR(values.contractAmount),
-        performanceBondAmount: parseLKR(values.performanceBondAmount)
-      };
-      console.log('Form values:', formattedValues);
+    validationSchema: validationSchema.shape({
+      projectId: Yup.string().required('Project is required'),
+    }),
+    onSubmit: async (values) => {
+      setIsSubmitting(true);
+      try {
+        const formattedValues = {
+          project_id: values.projectId,
+          date_awarded: values.dateAwarded ? values.dateAwarded.format('YYYY-MM-DD') : null,
+          contractor_name: values.contractorName,
+          contract_no: values.contractNo,
+          contract_amount: parseLKR(values.contractAmount),
+          vat_details: values.vatDetails,
+          contract_period: values.contractPeriod,
+          performance_bond_bank: values.performanceBondBank,
+          performance_bond_amount: parseLKR(values.performanceBondAmount),
+          performance_bond_expiry: values.performanceBondExpiry ? values.performanceBondExpiry.format('YYYY-MM-DD') : null,
+        };
+        
+        await contractorService.create(formattedValues);
+        setSnackbar({
+          open: true,
+          message: 'Contractor details saved successfully!',
+          severity: 'success',
+        });
+        formik.resetForm();
+      } catch (error) {
+        let errorMessage = 'Failed to save contractor details';
+        if (error.message.includes('foreign key constraint')) {
+          errorMessage = 'Invalid project selected';
+        } else if (error.message.includes('Duplicate entry')) {
+          errorMessage = 'A contractor is already assigned to this project';
+        }
+        setSnackbar({
+          open: true,
+          message: errorMessage,
+          severity: 'error',
+        });
+      } finally {
+        setIsSubmitting(false);
+      }
     },
   });
 
+  const handleSnackbarClose = () => {
+    setSnackbar({ ...snackbar, open: false });
+  };
+
   return (
     <Box sx={{ maxWidth: 1000, margin: '0 auto', pt: 1 }}>
-      <Paper 
-        elevation={0}
-        sx={{ 
-          p: { xs: 2, sm: 3, md: 4 },
-          background: 'linear-gradient(to right bottom, #ffffff, #f8fafc)',
-          borderRadius: 2
-        }}
-      >
-        <Typography 
-          variant="h5" 
-          gutterBottom
-          sx={{ 
-            color: 'primary.main',
-            fontWeight: 600,
-            mb: 3
-          }}
-        >
-          Contractor Selection
-        </Typography>
-        
+      <Paper>
         <form onSubmit={formik.handleSubmit}>
           <Grid container spacing={3}>
             <Grid item xs={12}>
@@ -90,6 +147,47 @@ function ContractorSelectionForm() {
                   color: 'secondary.main',
                   fontWeight: 500,
                   mb: 2
+                }}
+              >
+                Project Selection
+              </Typography>
+              <Divider sx={{ mb: 3 }} />
+            </Grid>
+
+            <Grid item xs={12}>
+              <TextField
+                select
+                fullWidth
+                id="projectId"
+                name="projectId"
+                label="Select Project"
+                value={formik.values.projectId}
+                onChange={formik.handleChange}
+                error={formik.touched.projectId && Boolean(formik.errors.projectId)}
+                helperText={formik.touched.projectId && formik.errors.projectId}
+                disabled={isLoadingProjects}
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    backgroundColor: '#ffffff'
+                  }
+                }}
+              >
+                {projects.map((project) => (
+                  <MenuItem key={project.id} value={project.id}>
+                    {project.project_no} - {project.project_description}
+                  </MenuItem>
+                ))}
+              </TextField>
+            </Grid>
+
+            <Grid item xs={12}>
+              <Typography 
+                variant="subtitle1" 
+                sx={{ 
+                  color: 'secondary.main',
+                  fontWeight: 500,
+                  mb: 2,
+                  mt: 2
                 }}
               >
                 Contract Details
@@ -314,6 +412,7 @@ function ContractorSelectionForm() {
                 color="primary"
                 size="large"
                 startIcon={<Save />}
+                disabled={isSubmitting || isLoadingProjects}
                 sx={{ 
                   mt: 4,
                   px: 4,
@@ -325,12 +424,23 @@ function ContractorSelectionForm() {
                   }
                 }}
               >
-                Save Contractor Details
+                {isSubmitting ? 'Saving...' : 'Save Contractor Details'}
               </Button>
             </Grid>
           </Grid>
         </form>
       </Paper>
+
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={6000}
+        onClose={handleSnackbarClose}
+        anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
+      >
+        <Alert onClose={handleSnackbarClose} severity={snackbar.severity}>
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 }
